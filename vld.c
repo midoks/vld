@@ -64,15 +64,15 @@ ZEND_GET_MODULE(vld)
 ZEND_DECLARE_MODULE_GLOBALS(vld)
 
 PHP_INI_BEGIN()
-	STD_PHP_INI_ENTRY("vld.web",          "0", PHP_INI_ALL,    OnUpdateBool, web,          zend_vld_globals, vld_globals)
+	STD_PHP_INI_ENTRY("vld.web",          "0", PHP_INI_ALL, OnUpdateBool, web,          zend_vld_globals, vld_globals)
     STD_PHP_INI_ENTRY("vld.active",       "0", PHP_INI_SYSTEM, OnUpdateBool, active,       zend_vld_globals, vld_globals)
-    STD_PHP_INI_ENTRY("vld.skip_prepend", "0", PHP_INI_SYSTEM, OnUpdateBool, skip_prepend, zend_vld_globals, vld_globals)
-    STD_PHP_INI_ENTRY("vld.skip_append",  "0", PHP_INI_SYSTEM, OnUpdateBool, skip_append,  zend_vld_globals, vld_globals)
+    STD_PHP_INI_ENTRY("vld.skip_prepend", "0", PHP_INI_ALL, OnUpdateBool, skip_prepend, zend_vld_globals, vld_globals)
+    STD_PHP_INI_ENTRY("vld.skip_append",  "0", PHP_INI_ALL, OnUpdateBool, skip_append,  zend_vld_globals, vld_globals)
     STD_PHP_INI_ENTRY("vld.execute",      "1", PHP_INI_SYSTEM, OnUpdateBool, execute,      zend_vld_globals, vld_globals)
-    STD_PHP_INI_ENTRY("vld.verbosity",    "1", PHP_INI_ALL, OnUpdateBool, verbosity,       zend_vld_globals, vld_globals)
+    STD_PHP_INI_ENTRY("vld.verbosity",    "1", PHP_INI_SYSTEM, OnUpdateBool, verbosity,    zend_vld_globals, vld_globals)
     STD_PHP_INI_ENTRY("vld.format",       "0", PHP_INI_SYSTEM, OnUpdateBool, format,       zend_vld_globals, vld_globals)
     STD_PHP_INI_ENTRY("vld.col_sep",      "\t", PHP_INI_SYSTEM, OnUpdateString, col_sep,   zend_vld_globals, vld_globals)
-	STD_PHP_INI_ENTRY("vld.save_dir",     "/tmp", PHP_INI_SYSTEM, OnUpdateString, save_dir,zend_vld_globals, vld_globals)
+	STD_PHP_INI_ENTRY("vld.save_dir",     "/tmp", PHP_INI_SYSTEM, OnUpdateString, save_dir, zend_vld_globals, vld_globals)
 	STD_PHP_INI_ENTRY("vld.save_paths",   "0", PHP_INI_SYSTEM, OnUpdateBool, save_paths,   zend_vld_globals, vld_globals)
 	STD_PHP_INI_ENTRY("vld.dump_paths",   "1", PHP_INI_SYSTEM, OnUpdateBool, dump_paths,   zend_vld_globals, vld_globals)
 PHP_INI_END()
@@ -247,6 +247,14 @@ static int vld_dump_fe (zend_op_array *fe TSRMLS_DC, int num_args, va_list args,
 	if (fe->type == ZEND_USER_FUNCTION) {
 		ZVAL_VALUE_STRING_TYPE *new_str;
 
+		if (VLD_G(web)){
+			if ((VLD_G(skip_prepend) && PG(auto_prepend_file) && PG(auto_prepend_file)[0] && !strcmp(PG(auto_prepend_file), ZSTRING_VALUE(fe->filename))) ||
+		     (VLD_G(skip_append)  && PG(auto_append_file)  && PG(auto_append_file)[0]  && !strcmp(PG(auto_append_file), ZSTRING_VALUE(fe->filename))) )
+			{
+				return ZEND_HASH_APPLY_KEEP;
+			}
+		}
+
 		new_str = php_url_encode(ZHASHKEYSTR(hash_key), ZHASHKEYLEN(hash_key) PHP_URLENCODE_NEW_LEN(new_len));
 		vld_printf(stderr, "Function %s:\n", ZSTRING_VALUE(new_str));
 		vld_dump_oparray(fe TSRMLS_CC);
@@ -293,22 +301,22 @@ static int vld_dump_cle (zend_class_entry *class_entry TSRMLS_DC)
 static zend_op_array *vld_compile_file(zend_file_handle *file_handle, int type TSRMLS_DC)
 {
 	if (VLD_G(web)){
-		php_printf("<hr/><pre>");
+		if ((VLD_G(skip_prepend) && PG(auto_prepend_file) && PG(auto_prepend_file)[0] && PG(auto_prepend_file) == file_handle->filename) ||
+	     (VLD_G(skip_append)  && PG(auto_append_file)  && PG(auto_append_file)[0]  && PG(auto_append_file)  == file_handle->filename))
+		{
+			zval nop;
+
+			zend_op_array *ret;
+			ZVAL_STRINGL(&nop, "RETURN ;", 8);
+			ret = compile_string(&nop, (char*) "NOP" TSRMLS_CC);
+			zval_dtor(&nop);
+			return ret;
+		}
+		php_printf("<pre>");
 	}
 
 	zend_op_array *op_array;
 
-	if (VLD_G(web) && 
-		((VLD_G(skip_prepend) && PG(auto_prepend_file) && PG(auto_prepend_file)[0] && PG(auto_prepend_file) == file_handle->filename) ||
-	     (VLD_G(skip_append)  && PG(auto_append_file)  && PG(auto_append_file)[0]  && PG(auto_append_file)  == file_handle->filename))){
-		zval nop;
-
-		zend_op_array *ret;
-		ZVAL_STRINGL(&nop, "RETURN ;", 8);
-		ret = compile_string(&nop, (char*) "NOP" TSRMLS_CC);
-		zval_dtor(&nop);
-		return ret;
-	}
 
 	if (!VLD_G(execute) &&
 		((VLD_G(skip_prepend) && PG(auto_prepend_file) && PG(auto_prepend_file)[0] && PG(auto_prepend_file) == file_handle->filename) ||
